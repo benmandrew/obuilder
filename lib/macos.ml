@@ -35,41 +35,14 @@ let delete_user ~user =
       let delete = ["dscl"; "."; "-delete"; user ] in
         sudo_result ~pp:(pp "Deleting") delete
 
-let descendants ~pid =
-  Lwt.catch
-    (fun () ->
-      let+ s = pread ["sudo"; "pgrep"; "-P"; string_of_int pid ] in
-      let pids = Astring.String.cuts ~sep:"\n" s in
-      List.filter_map int_of_string_opt pids)
-    (* Errors if there are none, probably errors for other reasons too… *)
-    (fun _ -> Lwt.return [])
-
-let kill ~pid =
-  let pp _ ppf = Fmt.pf ppf "[ KILL ]" in
-  let delete = ["kill"; "-9";  string_of_int pid ] in
-  let* t = sudo_result ~pp:(pp "KILL") delete in
-    match t with
-    | Ok () -> Lwt.return ()
-    | Error (`Msg m) ->
-      Log.warn (fun f -> f "Failed to kill process %i because %s" pid m);
-      Lwt.return ()
-
-let kill_all_descendants ~pid =
-  let rec kill_all pid : unit Lwt.t =
-    let* ds = descendants ~pid in
-    let* () = Lwt_list.iter_s kill_all ds in
-    kill ~pid
-  in
-    kill_all pid
-
-let kill_users_processes ~uid =
+let rec kill_users_processes ~uid =
   let pp _ ppf = Fmt.pf ppf "[ PKILL ]" in
   let delete = ["pkill"; "-9"; "-U"; string_of_int uid ] in
   let* t = sudo_result ~pp:(pp "PKILL") delete in
     match t with
-    | Ok () -> Lwt.return ()
+    | Ok () -> kill_users_processes ~uid
     | Error (`Msg m) ->
-      Log.warn (fun f -> f "pkill failed with %s" m);
+      Log.info (fun f -> f "pkill already all killed (%s)" m);
       Lwt.return ()
 
 let rm ~directory =

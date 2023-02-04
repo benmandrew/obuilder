@@ -127,6 +127,9 @@ module Zfs = struct
     Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name t src ~snapshot; Dataset.full_name t dst]
 
   let clone_with_children t ~src ~snapshot dst =
+(*    let+ s = pread ["zfs"; "list"; "-r"; "-o"; "name"; Dataset.full_name t src ~snapshot ] in
+zfs list -r -o name -H pool1/result/fa41846a7af54653595d812367081bde4023a967d66663f7fe4d9531366c5b9d
+    let clone_these = Astring.String.cuts ~sep:"\n" s in *)
     Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name t src ~snapshot; Dataset.full_name t dst] >>= fun () ->
     Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name_2 t src "home" ~snapshot; Dataset.full_name_2 t dst "home"] >>= fun () ->
     Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name_2 t src "local" ~snapshot; Dataset.full_name_2 t dst "local"]

@@ -96,10 +96,16 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   );
   proc >>= fun r ->
   copy_log >>= fun () ->
-    Macos.kill_users_processes ~uid:t.uid >>= fun () -> Lwt_unix.sleep 1.0 >>= fun () ->
-    Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "home"); zfs_home_dir ] >>= fun () ->
-    Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "local"); zfs_local ] >>= fun () ->
-    if Lwt.is_sleeping cancelled then Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)
+    (* processes might terminate themselves *)
+    Lwt_unix.sleep 1.0 >>= fun () ->
+    (* kill them *)
+    Macos.kill_users_processes ~uid:t.uid >>= fun () ->
+    (* wait for i/o to stop to the zfs volume *)
+    Lwt_unix.sleep 1.0 >>= fun () ->
+    if Lwt.is_sleeping cancelled then
+      Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "home"); zfs_home_dir ] >>= fun () ->
+      Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "local"); zfs_local ] >>= fun () ->
+      Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)
     else Lwt_result.fail `Cancelled)
 
 let create ~state_dir:_ c =
