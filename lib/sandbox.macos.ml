@@ -4,19 +4,8 @@ open Cmdliner
 type t = {
   uid: int;
   gid: int;
-  (* Where zfs dynamic libraries are -- can't be in /usr/local/lib
-     see notes in .mli file under "Various Gotchas"… *)
-  fallback_library_path : string;
-  (* FUSE file system mount point *)
-  fuse_path : string;
-  (* Scoreboard -- where we keep our symlinks for knowing homedirs for users *)
-  scoreboard : string;
-  (* Should the sandbox mount and unmount the FUSE filesystem *)
-  no_fuse : bool;
-  (* Whether or not the FUSE filesystem is mounted *)
-  mutable fuse_mounted : bool;
-  (* Whether we have chowned/chmoded the data *)
-  mutable chowned : bool;
+  (* mount point where Homebrew is installed. Either /opt/homebrew or /usr/local depending upon architecture *)
+  brew_path : string;
   lock : Lwt_mutex.t;
 }
 
@@ -24,10 +13,7 @@ open Sexplib.Conv
 
 type config = {
   uid: int;
-  fallback_library_path : string;
-  fuse_path : string;
-  scoreboard : string;
-  no_fuse : bool;
+  brew_path : string;
 }[@@deriving sexp]
 
 let run_as ~env ~user ~cmd =
@@ -56,37 +42,8 @@ let copy_to_log ~src ~dst =
    home directory, and to achieve this we copy in the pre-build environment
    and copy back out the result. It's not super efficienct, but is necessary.*)
 
-let unmount_fuse t =
-  if not t.fuse_mounted || t.no_fuse then Lwt.return () else
-  let f = ["umount"; "-f"; t.fuse_path] in
-  Os.sudo f >>= fun _ -> t.fuse_mounted <- false; Lwt.return ()
-
-let post_build ~result_dir ~home_dir t =
-  Os.sudo ["rsync"; "-aHq"; "--delete"; home_dir ^ "/"; result_dir ] >>= fun () ->
-  unmount_fuse t
-
-let post_cancellation ~result_tmp t =
-  Macos.rm ~directory:result_tmp >>= fun () ->
-  unmount_fuse t
-
-(* Using rsync to delete old files seems to be a good deal faster. *)
-let pre_build ~result_dir ~home_dir t =
-  Os.sudo [ "mkdir"; "-p"; "/tmp/obuilder-empty" ] >>= fun () ->
-  Os.sudo [ "rsync"; "-aHq"; "--delete"; "/tmp/obuilder-empty/"; home_dir ^ "/" ] >>= fun () ->
-  Os.sudo [ "rsync"; "-aHq"; result_dir ^ "/"; home_dir ] >>= fun () ->
-  (if t.chowned then Lwt.return () else begin
-    Os.sudo [ "chown"; "-R"; ":" ^ (string_of_int t.gid); home_dir ] >>= fun () ->
-    Os.sudo [ "chmod"; "-R"; "g+w"; home_dir ] >>= fun () ->
-    Lwt.return (t.chowned <- true)
-  end) >>= fun () ->
-  if t.fuse_mounted || t.no_fuse then Lwt.return () else
-  let f = [ "obuilderfs"; t.scoreboard ; t.fuse_path; "-o"; "allow_other" ] in
-  Os.sudo f >>= fun _ -> t.fuse_mounted <- true; Lwt.return ()
-
 let user_name ~prefix ~uid =
   Fmt.str "%s%i" prefix uid
-
-let home_directory user = Filename.concat "/Users/" user
 
 (* A build step in macos:
    - Should be properly sandboxed using sandbox-exec (coming soon…)
@@ -95,14 +52,19 @@ let home_directory user = Filename.concat "/Users/" user
    - Should be executed by the underlying user (t.uid) *)
 let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   Lwt_mutex.with_lock t.lock (fun () ->
+  Log.info (fun f -> f "result_tmp = %s" result_tmp);
   Os.with_pipe_from_child @@ fun ~r:out_r ~w:out_w ->
-  let result_dir = Filename.concat result_tmp "rootfs" in
   let user = user_name ~prefix:"mac" ~uid:t.uid in
-  let home_dir = home_directory user in
+  let zfs_volume = String.sub result_tmp 9 (String.length result_tmp - 9) in  (* remove /Volume/ *)
+  let home_dir = Filename.concat "/Users/" user in
+  let zfs_home_dir = Filename.concat zfs_volume "home" in
+  let zfs_local = Filename.concat zfs_volume "local" in
+  Os.sudo [ "zfs"; "set"; "mountpoint=" ^ home_dir; zfs_home_dir ] >>= fun () ->
+  Os.sudo [ "zfs"; "set"; "mountpoint=" ^ t.brew_path; zfs_local ] >>= fun () ->
   let uid = string_of_int t.uid in
-  Macos.create_new_user ~username:user ~home_dir ~uid ~gid:"1000" >>= fun _ ->
+  let gid = string_of_int t.gid in
+  Macos.create_new_user ~username:user ~home_dir ~uid ~gid >>= fun _ ->
   let set_homedir = Macos.change_home_directory_for ~user ~home_dir in
-  let update_scoreboard = Macos.update_scoreboard ~uid:t.uid ~home_dir ~scoreboard:t.scoreboard in
   let osenv = config.Config.env in
   let stdout = `FD_move_safely out_w in
   let stderr = stdout in
@@ -112,8 +74,6 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
     let stdin = Option.map (fun x -> `FD_move_safely x) stdin in
     let pp f = Os.pp_cmd f ("", config.Config.argv) in
     Os.sudo_result ~pp set_homedir >>= fun _ ->
-    Os.sudo_result ~pp update_scoreboard >>= fun _ ->
-    pre_build ~result_dir ~home_dir t >>= fun _ ->
     Os.pread @@ Macos.get_tmpdir ~user >>= fun tmpdir ->
     let tmpdir = List.hd (String.split_on_char '\n' tmpdir) in
     let env = ("TMPDIR", tmpdir) :: osenv in
@@ -122,22 +82,23 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
     let pid, proc = Os.open_process ?stdin ~stdout ~stderr ~pp ~cwd:config.Config.cwd cmd in
     proc_id := Some pid;
     Os.process_result ~pp proc >>= fun r ->
-    post_build ~result_dir ~home_dir t >>= fun () ->
     Lwt.return r
   in
   Lwt.on_termination cancelled (fun () ->
     let aux () =
-      (if Lwt.is_sleeping proc then
+      if Lwt.is_sleeping proc then
         match !proc_id with
-          | Some pid -> Macos.kill_all_descendants ~pid >>= fun () -> Lwt_unix.sleep 5.0
+          | Some _ -> Macos.kill_users_processes ~uid:t.uid >>= fun () -> Lwt_unix.sleep 1.0
           | None -> Log.warn (fun f -> f "Failed to find pid…"); Lwt.return ()
-      else Lwt.return_unit) (* Process has already finished *)
-          >>= fun () -> post_cancellation ~result_tmp t
+      else Lwt.return_unit (* Process has already finished *)
     in
       Lwt.async aux
   );
   proc >>= fun r ->
   copy_log >>= fun () ->
+    Macos.kill_users_processes ~uid:t.uid >>= fun () -> Lwt_unix.sleep 1.0 >>= fun () ->
+    Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "home"); zfs_home_dir ] >>= fun () ->
+    Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "local"); zfs_local ] >>= fun () ->
     if Lwt.is_sleeping cancelled then Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)
     else Lwt_result.fail `Cancelled)
 
@@ -145,12 +106,7 @@ let create ~state_dir:_ c =
   Lwt.return {
     uid = c.uid;
     gid = 1000;
-    fallback_library_path = c.fallback_library_path;
-    fuse_path = c.fuse_path;
-    scoreboard = c.scoreboard;
-    no_fuse = c.no_fuse;
-    fuse_mounted = false;
-    chowned = false;
+    brew_path = c.brew_path;
     lock = Lwt_mutex.create ();
   }
 
@@ -163,43 +119,16 @@ let uid =
     ~docv:"UID"
     ["uid"]
 
-let fallback_library_path =
+let brew_path =
   Arg.required @@
   Arg.opt Arg.(some file) None @@
   Arg.info
-    ~doc:"The fallback path of the dynamic libraries. This is used whenever the FUSE filesystem \
-    is in place preventing anything is /usr/local from being accessed."
-    ~docv:"FALLBACK"
-    ["fallback"]
-
-let fuse_path =
-  Arg.required @@
-  Arg.opt Arg.(some file) None @@
-  Arg.info
-    ~doc:"Directory to mount FUSE filesystem on, typically this is either /usr/local or /opt/homebrew."
-    ~docv:"FUSE_PATH"
-    ["fuse-path"]
-
-let scoreboard =
-  Arg.required @@
-  Arg.opt Arg.(some file) None @@
-  Arg.info
-    ~doc:"The scoreboard directory which is used by the FUSE filesystem to record \
-    the association between user id and home directory."
-    ~docv:"SCOREBOARD"
-    ["scoreboard"]
-
-let no_fuse =
-  Arg.value @@
-  Arg.flag @@
-  Arg.info
-    ~doc:"Whether the macOS sandbox should mount and unmount the FUSE filesystem. \
-    This is useful for testing."
-    ~docv:"NO-FUSE"
-    ["no-fuse"]
+    ~doc:"Directory where Homebrew is installed. Typically this is either /usr/local or /opt/homebrew."
+    ~docv:"BREW_PATH"
+    ["brew-path"]
 
 let cmdliner : config Term.t =
-  let make uid fallback_library_path fuse_path scoreboard no_fuse =
-    { uid; fallback_library_path; fuse_path; scoreboard; no_fuse }
+  let make uid brew_path =
+    { uid; brew_path }
   in
-  Term.(const make $ uid $ fallback_library_path $ fuse_path $ scoreboard $ no_fuse)
+  Term.(const make $ uid $ brew_path)

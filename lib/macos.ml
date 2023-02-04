@@ -62,6 +62,16 @@ let kill_all_descendants ~pid =
   in
     kill_all pid
 
+let kill_users_processes ~uid =
+  let pp _ ppf = Fmt.pf ppf "[ PKILL ]" in
+  let delete = ["pkill"; "-9"; "-U"; string_of_int uid ] in
+  let* t = sudo_result ~pp:(pp "PKILL") delete in
+    match t with
+    | Ok () -> Lwt.return ()
+    | Error (`Msg m) ->
+      Log.warn (fun f -> f "pkill failed with %s" m);
+      Lwt.return ()
+
 let rm ~directory =
   let pp _ ppf = Fmt.pf ppf "[ RM ]" in
   let delete = ["rm"; "-r"; directory ] in
@@ -78,13 +88,6 @@ let copy_template ~base ~local =
 
 let change_home_directory_for ~user ~home_dir =
   ["dscl"; "."; "-create"; "/Users/" ^ user ; "NFSHomeDirectory"; home_dir ]
-
-(* Used by the FUSE filesystem to indicate where a users home directory should be …*)
-let update_scoreboard ~uid ~scoreboard ~home_dir =
-  ["ln"; "-Fhs"; home_dir; scoreboard ^ "/" ^ string_of_int uid]
-
-let remove_link ~uid ~scoreboard =
-  [ "rm"; scoreboard ^ "/" ^ string_of_int uid ]
 
 let get_tmpdir ~user =
   ["sudo"; "-u"; user; "-i"; "getconf"; "DARWIN_USER_TEMP_DIR"]

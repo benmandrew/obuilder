@@ -51,6 +51,7 @@ module Dataset : sig
   val cache_tmp : int -> string -> dataset
 
   val full_name : ?snapshot:string -> t -> dataset -> string
+  val full_name_2 : ?snapshot:string -> t -> dataset -> string -> string
   val path : ?snapshot:string -> t -> dataset -> string
 
   val exists : ?snapshot:string -> t -> dataset -> bool
@@ -73,6 +74,11 @@ end = struct
     match snapshot with
     | None -> strf "%s/%s" t.pool ds
     | Some snapshot -> strf "%s/%s@%s" t.pool ds snapshot
+
+  let full_name_2 ?snapshot t ds sub =
+    match snapshot with
+    | None -> strf "%s/%s/%s" t.pool ds sub
+    | Some snapshot -> strf "%s/%s/%s@%s" t.pool ds sub snapshot
 
   let path ?snapshot t ds =
     match snapshot with
@@ -102,7 +108,7 @@ module Zfs = struct
   let destroy t ds mode =
     let opts =
       match mode with
-      | `Only -> []
+      | `Only -> ["-r"; "-f"]
       | `And_snapshots -> ["-r"]
       | `And_snapshots_and_clones -> ["-R"]
     in
@@ -120,8 +126,13 @@ module Zfs = struct
   let clone t ~src ~snapshot dst =
     Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name t src ~snapshot; Dataset.full_name t dst]
 
+  let clone_with_children t ~src ~snapshot dst =
+    Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name t src ~snapshot; Dataset.full_name t dst] >>= fun () ->
+    Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name_2 t src "home" ~snapshot; Dataset.full_name_2 t dst "home"] >>= fun () ->
+    Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name_2 t src "local" ~snapshot; Dataset.full_name_2 t dst "local"]
+
   let snapshot t ds ~snapshot =
-    Os.sudo ["zfs"; "snapshot"; "--"; Dataset.full_name t ds ~snapshot]
+    Os.sudo ["zfs"; "snapshot"; "-r"; "--"; Dataset.full_name t ds ~snapshot]
 
   let promote t ds =
     Os.sudo ["zfs"; "promote"; Dataset.full_name t ds]
@@ -187,7 +198,7 @@ let build t ?base ~id fn =
       Zfs.chown ~user t ds
     | Some base ->
       let src = Dataset.result base in
-      Zfs.clone t ~src ~snapshot:default_snapshot ds
+      Zfs.clone_with_children t ~src ~snapshot:default_snapshot ds
   end
   >>= fun () ->
   Lwt.try_bind
