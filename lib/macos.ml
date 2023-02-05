@@ -39,8 +39,8 @@ let rec kill_users_processes ~uid =
   let* t = sudo_result ~pp:(pp "PKILL") delete in
     match t with
     | Ok () -> kill_users_processes ~uid
-    | Error (`Msg m) ->
-      Log.info (fun f -> f "pkill already all killed (%s)" m);
+    | Error (`Msg _) ->
+      Log.info (fun f -> f "pkill all killed");
       Lwt.return ()
 
 let rm ~directory =

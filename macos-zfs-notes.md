@@ -22,7 +22,9 @@ The `ln -s /usr/local` is required as the spec contains this line which referenc
  (run (shell "ln -f ~/local/bin/opam-2.1 ~/local/bin/opam"))
 ```
 
-Install OpenZFS and accept the kernel extension via system preferences
+Remove macFuse to avoid any possibility of a conflict.
+
+Install OpenZFS and accept the kernel extension via system preferences.
 
 ```
 brew install openzfs
