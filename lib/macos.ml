@@ -17,10 +17,8 @@ let create_new_user ~username ~home_dir ~uid ~gid =
     let pp s ppf = Fmt.pf ppf "[ Mac ] %s\n" s in
     let dscl = [ "dscl"; "."; "-create"; user ] in
     sudo_result ~pp:(pp "UniqueID") (dscl @ [ "UniqueID"; uid ]) >>!= fun _ ->
-    sudo_result ~pp:(pp "PrimaryGroupID") (dscl @ [ "PrimaryGroupID"; gid ])
-    >>!= fun _ ->
-    sudo_result ~pp:(pp "UserShell") (dscl @ [ "UserShell"; "/bin/bash" ])
-    >>!= fun _ ->
+    sudo_result ~pp:(pp "PrimaryGroupID") (dscl @ [ "PrimaryGroupID"; gid ]) >>!= fun _ ->
+    sudo_result ~pp:(pp "UserShell") (dscl @ [ "UserShell"; "/bin/bash" ]) >>!= fun _ ->
     sudo_result ~pp:(pp "NFSHomeDirectory") (dscl @ [ "NFSHomeDirectory"; home_dir ])
 
 let delete_user ~user =
@@ -58,9 +56,6 @@ let rm ~directory =
 let copy_template ~base ~local =
   let pp s ppf = Fmt.pf ppf "[ %s ]" s in
   sudo_result ~pp:(pp "RSYNC") ["rsync"; "-avq"; base ^ "/"; local]
-
-let change_home_directory_for ~user ~home_dir =
-  ["dscl"; "."; "-create"; "/Users/" ^ user ; "NFSHomeDirectory"; home_dir ]
 
 let get_tmpdir ~user =
   ["sudo"; "-u"; user; "-i"; "getconf"; "DARWIN_USER_TEMP_DIR"]

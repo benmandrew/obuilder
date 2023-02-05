@@ -64,7 +64,6 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   let uid = string_of_int t.uid in
   let gid = string_of_int t.gid in
   Macos.create_new_user ~username:user ~home_dir ~uid ~gid >>= fun _ ->
-  let set_homedir = Macos.change_home_directory_for ~user ~home_dir in
   let osenv = config.Config.env in
   let stdout = `FD_move_safely out_w in
   let stderr = stdout in
@@ -73,7 +72,6 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   let proc =
     let stdin = Option.map (fun x -> `FD_move_safely x) stdin in
     let pp f = Os.pp_cmd f ("", config.Config.argv) in
-    Os.sudo_result ~pp set_homedir >>= fun _ ->
     Os.pread @@ Macos.get_tmpdir ~user >>= fun tmpdir ->
     let tmpdir = List.hd (String.split_on_char '\n' tmpdir) in
     let env = ("TMPDIR", tmpdir) :: osenv in
@@ -88,7 +86,7 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
     let aux () =
       if Lwt.is_sleeping proc then
         match !proc_id with
-          | Some _ -> Macos.kill_users_processes ~uid:t.uid >>= fun () -> Lwt_unix.sleep 1.0
+          | Some _ -> Macos.kill_users_processes ~uid:t.uid
           | None -> Log.warn (fun f -> f "Failed to find pid…"); Lwt.return ()
       else Lwt.return_unit (* Process has already finished *)
     in
@@ -96,12 +94,7 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   );
   proc >>= fun r ->
   copy_log >>= fun () ->
-    (* processes might terminate themselves *)
-    Lwt_unix.sleep 1.0 >>= fun () ->
-    (* kill them *)
     Macos.kill_users_processes ~uid:t.uid >>= fun () ->
-    (* wait for i/o to stop to the zfs volume *)
-    Lwt_unix.sleep 1.0 >>= fun () ->
     if Lwt.is_sleeping cancelled then
       Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "home"); zfs_home_dir ] >>= fun () ->
       Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "local"); zfs_local ] >>= fun () ->
