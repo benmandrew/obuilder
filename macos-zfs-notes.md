@@ -48,6 +48,7 @@ Create a ZFS pool
 ```
 sudo mkfile 10G /Volumes/zfs
 sudo zpool create pool1 /Volumes/zfs
+sudo zfs set atime=off pool1
 ```
 
 Turn off desktop icons as each ZFS volume becomes an icon!
@@ -56,6 +57,8 @@ Turn off desktop icons as each ZFS volume becomes an icon!
 defaults write com.apple.finder CreateDesktop -bool false
 killall Finder
 ```
+
+> Finder still uses lots of CPU so it's better for the worker to be signed out rather than sitting at the desktop.  The workers are at the desktop as they need Docker to be running.  The requirement for the Docker installation can be entry mitigated by creating `/usr/local/bin/docker` containing just `#!/bin/bash`.  This passes the Docker health check code.  Now, with a signed out worker, Finder isn't running at all.
 
 Get my obuilder branch
 
