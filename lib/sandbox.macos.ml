@@ -45,6 +45,11 @@ let copy_to_log ~src ~dst =
 let user_name ~prefix ~uid =
   Fmt.str "%s%i" prefix uid
 
+let rec remainder i n = function
+  | [] -> []
+  | hd :: tl when i >= n -> hd :: remainder (i + 1) n tl
+  | _ :: tl -> remainder (i + 1) n tl
+
 (* A build step in macos:
    - Should be properly sandboxed using sandbox-exec (coming soon…)
    - Umask g+w to work across users if restored from a snapshot
@@ -55,7 +60,8 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   Log.info (fun f -> f "result_tmp = %s" result_tmp);
   Os.with_pipe_from_child @@ fun ~r:out_r ~w:out_w ->
   let user = user_name ~prefix:"mac" ~uid:t.uid in
-  let zfs_volume = String.sub result_tmp 9 (String.length result_tmp - 9) in  (* remove /Volume/ *)
+  let path = remainder 0 2 (String.split_on_char '/' result_tmp) in  (* remove /Volume/ *)
+  let zfs_volume = String.concat "/" path in
   let home_dir = Filename.concat "/Users/" user in
   let zfs_home_dir = Filename.concat zfs_volume "home" in
   let zfs_local = Filename.concat zfs_volume "local" in
@@ -96,8 +102,8 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   copy_log >>= fun () ->
     Macos.kill_users_processes ~uid:t.uid >>= fun () ->
     if Lwt.is_sleeping cancelled then
-      Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "home"); zfs_home_dir ] >>= fun () ->
-      Os.sudo [ "zfs"; "set"; "mountpoint=" ^ (Filename.concat result_tmp "local"); zfs_local ] >>= fun () ->
+      Os.sudo [ "zfs"; "unmount"; zfs_home_dir ] >>= fun () ->
+      Os.sudo [ "zfs"; "unmount"; zfs_local ] >>= fun () ->
       Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)
     else Lwt_result.fail `Cancelled)
 

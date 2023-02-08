@@ -1,4 +1,5 @@
 open Lwt.Infix
+open Lwt.Syntax
 
 (* This is rather complicated, because (unlike btrfs):
    - zfs won't let you delete datasets that other datasets are cloned from.
@@ -126,6 +127,15 @@ module Zfs = struct
   let clone t ~src ~snapshot dst =
     Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name t src ~snapshot; Dataset.full_name t dst]
 
+  let mount t ~ds ~snapshot =
+    let pp _ ppf = Fmt.pf ppf "zfs mount" in
+    let* t = Os.sudo_result ~pp:(pp "zfs mount") ~is_success:(fun n -> n = 0 || n = 16) ["zfs"; "mount"; "--"; Dataset.full_name t ds ~snapshot] in
+      match t with
+      | Ok () -> Lwt.return ()
+      | Error (`Msg m) ->
+        Log.info (fun f -> f "%s" m);
+        Lwt.return ()
+
   let clone_with_children t ~src ~snapshot dst =
 (*    let+ s = pread ["zfs"; "list"; "-r"; "-o"; "name"; Dataset.full_name t src ~snapshot ] in
 zfs list -r -o name -H pool1/result/fa41846a7af54653595d812367081bde4023a967d66663f7fe4d9531366c5b9d
@@ -226,6 +236,7 @@ let build t ?base ~id fn =
 
 let result t id =
   let ds = Dataset.result id in
+  Zfs.mount t ~ds ~snapshot:default_snapshot >>= fun () ->
   let path = Dataset.path t ds ~snapshot:default_snapshot in
   if Sys.file_exists path then Lwt.return_some path
   else Lwt.return_none
