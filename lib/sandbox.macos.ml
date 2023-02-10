@@ -103,7 +103,9 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
     Macos.kill_users_processes ~uid:t.uid >>= fun () ->
     if Lwt.is_sleeping cancelled then
       Os.sudo [ "zfs"; "unmount"; zfs_home_dir ] >>= fun () ->
+      Os.sudo [ "zfs"; "set"; "canmount=noauto"; zfs_home_dir ] >>= fun () ->
       Os.sudo [ "zfs"; "unmount"; zfs_local ] >>= fun () ->
+      Os.sudo [ "zfs"; "set"; "canmount=noauto"; zfs_local ] >>= fun () ->
       Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)
     else Lwt_result.fail `Cancelled)
 
