@@ -51,8 +51,7 @@ module Dataset : sig
   val cache : string -> dataset
   val cache_tmp : int -> string -> dataset
 
-  val full_name : ?snapshot:string -> t -> dataset -> string
-  val full_name_2 : ?snapshot:string -> t -> dataset -> string -> string
+  val full_name : ?snapshot:string -> ?subvolume:string -> t -> dataset -> string
   val path : ?snapshot:string -> t -> dataset -> string
 
   val exists : ?snapshot:string -> t -> dataset -> bool
@@ -71,15 +70,12 @@ end = struct
   let cache name = "cache/" ^ Escape.cache name
   let cache_tmp i name = strf "cache-tmp/%d-%s" i (Escape.cache name)
 
-  let full_name ?snapshot t ds =
-    match snapshot with
-    | None -> strf "%s/%s" t.pool ds
-    | Some snapshot -> strf "%s/%s@%s" t.pool ds snapshot
-
-  let full_name_2 ?snapshot t ds sub =
-    match snapshot with
-    | None -> strf "%s/%s/%s" t.pool ds sub
-    | Some snapshot -> strf "%s/%s/%s@%s" t.pool ds sub snapshot
+  let full_name ?snapshot ?subvolume t ds =
+    match snapshot, subvolume with
+    | None, None -> strf "%s/%s" t.pool ds
+    | Some snapshot, None -> strf "%s/%s@%s" t.pool ds snapshot
+    | None, Some subvolume -> strf "%s/%s/%s" t.pool ds subvolume
+    | Some snapshot, Some subvolume -> strf "%s/%s/%s@%s" t.pool ds subvolume snapshot
 
   let path ?snapshot t ds =
     match snapshot with
@@ -137,12 +133,23 @@ module Zfs = struct
         Lwt.return ()
 
   let clone_with_children t ~src ~snapshot dst =
-(*    let+ s = pread ["zfs"; "list"; "-r"; "-o"; "name"; Dataset.full_name t src ~snapshot ] in
+(*
+    let* s = pread ["zfs"; "list"; "-r"; "-o"; "name"; Dataset.full_name t src ] in
 zfs list -r -o name -H pool1/result/fa41846a7af54653595d812367081bde4023a967d66663f7fe4d9531366c5b9d
-    let clone_these = Astring.String.cuts ~sep:"\n" s in *)
+    let children = Astring.String.cuts ~:"\n" s in
+    Lwt_list.iter_s (fun ds ->
+      let pool :: elements = Astring.String.cuts ~sep:"/" ds in
+      let ds = String.
+    ) children
+*)
+
     Os.sudo ["zfs"; "clone"; "--"; Dataset.full_name t src ~snapshot; Dataset.full_name t dst] >>= fun () ->
-    Os.sudo ["zfs"; "clone"; "-o"; "mountpoint=none"; "--"; Dataset.full_name_2 t src "home" ~snapshot; Dataset.full_name_2 t dst "home"] >>= fun () ->
-    Os.sudo ["zfs"; "clone"; "-o"; "mountpoint=none"; "--"; Dataset.full_name_2 t src "local" ~snapshot; Dataset.full_name_2 t dst "local"]
+    Os.sudo ["zfs"; "clone"; "-o"; "mountpoint=none"; "--";
+             Dataset.full_name t src ~subvolume:"home" ~snapshot;
+             Dataset.full_name t dst ~subvolume:"home"] >>= fun () ->
+    Os.sudo ["zfs"; "clone"; "-o"; "mountpoint=none"; "--";
+             Dataset.full_name t src ~subvolume:"brew" ~snapshot;
+             Dataset.full_name t dst ~subvolume:"brew"]
 
   let snapshot t ds ~snapshot =
     Os.sudo ["zfs"; "snapshot"; "-r"; "--"; Dataset.full_name t ds ~snapshot]

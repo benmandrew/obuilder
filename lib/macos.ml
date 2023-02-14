@@ -53,9 +53,5 @@ let rm ~directory =
       Log.warn (fun f -> f "Failed to remove %s because %s" directory m);
       Lwt.return ()
 
-let copy_template ~base ~local =
-  let pp s ppf = Fmt.pf ppf "[ %s ]" s in
-  sudo_result ~pp:(pp "RSYNC") ["rsync"; "-avq"; base ^ "/"; local]
-
 let get_tmpdir ~user =
   ["sudo"; "-u"; user; "-i"; "getconf"; "DARWIN_USER_TEMP_DIR"]

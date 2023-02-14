@@ -64,9 +64,9 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   let zfs_volume = String.concat "/" path in
   let home_dir = Filename.concat "/Users/" user in
   let zfs_home_dir = Filename.concat zfs_volume "home" in
-  let zfs_local = Filename.concat zfs_volume "local" in
+  let zfs_brew = Filename.concat zfs_volume "brew" in
   Os.sudo [ "zfs"; "set"; "mountpoint=" ^ home_dir; zfs_home_dir ] >>= fun () ->
-  Os.sudo [ "zfs"; "set"; "mountpoint=" ^ t.brew_path; zfs_local ] >>= fun () ->
+  Os.sudo [ "zfs"; "set"; "mountpoint=" ^ t.brew_path; zfs_brew ] >>= fun () ->
   let uid = string_of_int t.uid in
   let gid = string_of_int t.gid in
   Macos.create_new_user ~username:user ~home_dir ~uid ~gid >>= fun _ ->
@@ -102,10 +102,8 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   copy_log >>= fun () ->
     Macos.kill_users_processes ~uid:t.uid >>= fun () ->
     if Lwt.is_sleeping cancelled then
-      Os.sudo [ "zfs"; "unmount"; zfs_home_dir ] >>= fun () ->
-      Os.sudo [ "zfs"; "set"; "canmount=noauto"; zfs_home_dir ] >>= fun () ->
-      Os.sudo [ "zfs"; "unmount"; zfs_local ] >>= fun () ->
-      Os.sudo [ "zfs"; "set"; "canmount=noauto"; zfs_local ] >>= fun () ->
+      Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_home_dir ] >>= fun () ->
+      Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_brew ] >>= fun () ->
       Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)
     else Lwt_result.fail `Cancelled)
 
