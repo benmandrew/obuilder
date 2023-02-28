@@ -67,6 +67,10 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   let zfs_brew = Filename.concat zfs_volume "brew" in
   Os.sudo [ "zfs"; "set"; "mountpoint=" ^ home_dir; zfs_home_dir ] >>= fun () ->
   Os.sudo [ "zfs"; "set"; "mountpoint=" ^ t.brew_path; zfs_brew ] >>= fun () ->
+  Lwt_list.iter_s (fun { Config.Mount.src; dst; readonly } ->
+    Log.info (fun f -> f "src = %s, dst = %s, type %s" src dst (if readonly then "ro" else "rw") );
+    let src_path = remainder 0 2 (String.split_on_char '/' src) in  (* remove /Volume/ *)
+    Os.sudo [ "zfs"; "set"; "mountpoint=" ^ dst; String.concat "/" src_path ] ) config.Config.mounts >>= fun () ->
   let uid = string_of_int t.uid in
   let gid = string_of_int t.gid in
   Macos.create_new_user ~username:user ~home_dir ~uid ~gid >>= fun _ ->
@@ -102,6 +106,9 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   copy_log >>= fun () ->
     Macos.kill_users_processes ~uid:t.uid >>= fun () ->
     if Lwt.is_sleeping cancelled then
+      Lwt_list.iter_s (fun { Config.Mount.src; dst; readonly } ->
+        let src_path = remainder 0 2 (String.split_on_char '/' src) in  (* remove /Volume/ *)
+        Os.sudo [ "zfs"; "inherit"; "mountpoint"; String.concat "/" src_path ] ) config.Config.mounts >>= fun () ->
       Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_home_dir ] >>= fun () ->
       Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_brew ] >>= fun () ->
       Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)

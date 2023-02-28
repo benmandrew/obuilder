@@ -105,9 +105,9 @@ module Zfs = struct
   let destroy t ds mode =
     let opts =
       match mode with
-      | `Only -> ["-r"; "-f"]
-      | `And_snapshots -> ["-r"]
-      | `And_snapshots_and_clones -> ["-R"]
+      | `Only -> ["-f"]
+      | `And_snapshots -> ["-r"; "-f"]
+      | `And_snapshots_and_clones -> ["-R"; "-f"]
     in
     Os.sudo (["zfs"; "destroy"] @ opts @ ["--"; Dataset.full_name t ds])
 
@@ -232,12 +232,12 @@ let build t ?base ~id fn =
         Lwt_result.return ()
       | Error _ as e ->
         Log.debug (fun f -> f "zfs: build %S failed" id);
-        Zfs.destroy t ds `Only >>= fun () ->
+        Zfs.destroy t ds `And_snapshots >>= fun () ->
         Lwt.return e
     )
     (fun ex ->
         Log.warn (fun f -> f "Uncaught exception from %S build function: %a" id Fmt.exn ex);
-        Zfs.destroy t ds `Only >>= fun () ->
+        Zfs.destroy t ds `And_snapshots >>= fun () ->
         Lwt.fail ex
     )
 
