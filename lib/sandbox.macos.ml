@@ -69,8 +69,10 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   Os.sudo [ "zfs"; "set"; "mountpoint=" ^ t.brew_path; zfs_brew ] >>= fun () ->
   Lwt_list.iter_s (fun { Config.Mount.src; dst; readonly } ->
     Log.info (fun f -> f "src = %s, dst = %s, type %s" src dst (if readonly then "ro" else "rw") );
-    let src_path = remainder 0 2 (String.split_on_char '/' src) in  (* remove /Volume/ *)
-    Os.sudo [ "zfs"; "set"; "mountpoint=" ^ dst; String.concat "/" src_path ] ) config.Config.mounts >>= fun () ->
+    if Sys.file_exists dst then
+      let src_path = remainder 0 2 (String.split_on_char '/' src) in  (* remove /Volume/ *)
+      Os.sudo [ "zfs"; "set"; "mountpoint=" ^ dst; String.concat "/" src_path ]
+    else Lwt.return_unit) config.Config.mounts >>= fun () ->
   let uid = string_of_int t.uid in
   let gid = string_of_int t.gid in
   Macos.create_new_user ~username:user ~home_dir ~uid ~gid >>= fun _ ->
