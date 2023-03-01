@@ -108,7 +108,7 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   copy_log >>= fun () ->
     Macos.kill_users_processes ~uid:t.uid >>= fun () ->
     if Lwt.is_sleeping cancelled then
-      Lwt_list.iter_s (fun { Config.Mount.src; dst; readonly } ->
+      Lwt_list.iter_s (fun { Config.Mount.src; dst = _; readonly = _ } ->
         let src_path = remainder 0 2 (String.split_on_char '/' src) in  (* remove /Volume/ *)
         Os.sudo [ "zfs"; "inherit"; "mountpoint"; String.concat "/" src_path ] ) config.Config.mounts >>= fun () ->
       Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_home_dir ] >>= fun () ->
