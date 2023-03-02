@@ -1,5 +1,6 @@
 (* Extensions to the Os module for macOS *)
 open Lwt.Syntax
+open Lwt.Infix
 open Os
 
 let ( / ) = Filename.concat
@@ -42,6 +43,18 @@ let rec kill_users_processes ~uid =
     | Error (`Msg _) ->
       Log.info (fun f -> f "pkill all killed");
       Lwt.return ()
+
+let rec sudo_retry cmds ~uid =
+  let pp f = pp_cmd f ("", cmds) in
+  let* t = sudo_result ~pp cmds in
+    match t with
+    | Ok () -> Lwt.return ()
+    | Error (`Msg m) ->
+      Log.warn (fun f -> f "%s failed with %s" (String.concat " " cmds) m);
+      (* wait a second then try to kill any user processes and retry *)
+      Lwt_unix.sleep 2.0 >>= fun () ->
+      kill_users_processes ~uid >>= fun () ->
+      sudo_retry cmds ~uid
 
 let rm ~directory =
   let pp _ ppf = Fmt.pf ppf "[ RM ]" in
