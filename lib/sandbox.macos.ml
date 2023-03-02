@@ -106,13 +106,12 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
   );
   proc >>= fun r ->
   copy_log >>= fun () ->
-    Macos.kill_users_processes ~uid:t.uid >>= fun () ->
+    Lwt_list.iter_s (fun { Config.Mount.src; dst = _; readonly = _ } ->
+      let src_path = remainder 0 2 (String.split_on_char '/' src) in  (* remove /Volume/ *)
+      Os.sudo [ "zfs"; "inherit"; "mountpoint"; String.concat "/" src_path ] ) config.Config.mounts >>= fun () ->
+    Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_home_dir ] >>= fun () ->
+    Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_brew ] >>= fun () ->
     if Lwt.is_sleeping cancelled then
-      Lwt_list.iter_s (fun { Config.Mount.src; dst = _; readonly = _ } ->
-        let src_path = remainder 0 2 (String.split_on_char '/' src) in  (* remove /Volume/ *)
-        Os.sudo [ "zfs"; "inherit"; "mountpoint"; String.concat "/" src_path ] ) config.Config.mounts >>= fun () ->
-      Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_home_dir ] >>= fun () ->
-      Os.sudo [ "zfs"; "set"; "mountpoint=none"; zfs_brew ] >>= fun () ->
       Lwt.return (r :> (unit, [`Msg of string | `Cancelled]) result)
     else Lwt_result.fail `Cancelled)
 
