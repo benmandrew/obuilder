@@ -127,10 +127,10 @@ module Zfs = struct
     let pp _ ppf = Fmt.pf ppf "zfs mount" in
     let* t = Os.sudo_result ~pp:(pp "zfs mount") ~is_success:(fun n -> n = 0 || n = 16) ["zfs"; "mount"; "--"; Dataset.full_name t ds ~snapshot] in
       match t with
-      | Ok () -> Lwt.return ()
+      | Ok () -> Lwt.return_unit
       | Error (`Msg m) ->
         Log.info (fun f -> f "%s" m);
-        Lwt.return ()
+        Lwt.return_unit
 
   let clone_with_children t ~src ~snapshot dst =
 (*

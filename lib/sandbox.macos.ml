@@ -99,7 +99,7 @@ let run ~cancelled ?stdin:stdin ~log (t : t) config result_tmp =
       if Lwt.is_sleeping proc then
         match !proc_id with
           | Some _ -> Macos.kill_users_processes ~uid:t.uid
-          | None -> Log.warn (fun f -> f "Failed to find pid…"); Lwt.return ()
+          | None -> Log.warn (fun f -> f "Failed to find pid…"); Lwt.return_unit
       else Lwt.return_unit (* Process has already finished *)
     in
       Lwt.async aux

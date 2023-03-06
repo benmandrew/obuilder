@@ -34,15 +34,29 @@ let delete_user ~user =
       let delete = ["dscl"; "."; "-delete"; user ] in
         sudo_result ~pp:(pp "Deleting") delete
 
+let exists_non_zombie_processes ~uid =
+  let pp _ ppf = Fmt.pf ppf "[ PS AXO ]" in
+  let exists = ["ps"; "axo"; "uid,stat"; "|"; "awk"; "'$2 ~ /^Z/ { print $1 }"; "|"; "grep"; string_of_int uid] in
+  let* t = sudo_result ~pp:(pp "PS AXO") exists in
+  match t with
+  | Ok () -> Lwt.return_false
+  | Error (`Msg _) -> Lwt.return_true
+
+(** When `pkill` attempts to kill a zombified process, the process remains but `pkill` returns 0 (success).
+    Thus `kill_users_processes` enters an infinite loop. Thus we check beforehand that there are no zombie processes. *)
 let rec kill_users_processes ~uid =
   let pp _ ppf = Fmt.pf ppf "[ PKILL ]" in
   let delete = ["pkill"; "-9"; "-U"; string_of_int uid ] in
   let* t = sudo_result ~pp:(pp "PKILL") delete in
     match t with
-    | Ok () -> kill_users_processes ~uid
+    | Ok () ->
+        exists_non_zombie_processes ~uid
+        >>= (fun b ->
+          if b then Lwt.return_unit
+          else kill_users_processes ~uid)
     | Error (`Msg _) ->
       Log.info (fun f -> f "pkill all killed");
-      Lwt.return ()
+      Lwt.return_unit
 
 let rec sudo_retry cmds ~uid =
   let pp f = pp_cmd f ("", cmds) in
@@ -61,10 +75,10 @@ let rm ~directory =
   let delete = ["rm"; "-r"; directory ] in
   let* t = sudo_result ~pp:(pp "RM") delete in
     match t with
-    | Ok () -> Lwt.return ()
+    | Ok () -> Lwt.return_unit
     | Error (`Msg m) ->
       Log.warn (fun f -> f "Failed to remove %s because %s" directory m);
-      Lwt.return ()
+      Lwt.return_unit
 
 let get_tmpdir ~user =
   ["sudo"; "-u"; user; "-i"; "getconf"; "DARWIN_USER_TEMP_DIR"]
