@@ -34,29 +34,22 @@ let delete_user ~user =
       let delete = ["dscl"; "."; "-delete"; user ] in
         sudo_result ~pp:(pp "Deleting") delete
 
-let exists_non_zombie_processes ~uid =
-  let pp _ ppf = Fmt.pf ppf "[ PS AXO ]" in
-  let exists = ["ps"; "axo"; "uid,stat"; "|"; "awk"; "'$2 ~ /^Z/ { print $1 }"; "|"; "grep"; string_of_int uid] in
-  let* t = sudo_result ~pp:(pp "PS AXO") exists in
-  match t with
-  | Ok () -> Lwt.return_false
-  | Error (`Msg _) -> Lwt.return_true
-
-(** When `pkill` attempts to kill a zombified process, the process remains but `pkill` returns 0 (success).
-    Thus `kill_users_processes` enters an infinite loop. Thus we check beforehand that there are no zombie processes. *)
-let rec kill_users_processes ~uid =
-  let pp _ ppf = Fmt.pf ppf "[ PKILL ]" in
-  let delete = ["pkill"; "-9"; "-U"; string_of_int uid ] in
-  let* t = sudo_result ~pp:(pp "PKILL") delete in
+(** Attempt to `pkill` at most 8 times, as we can't tell whether we're successfully
+    killing processes or whether a zombified process is stuck *)
+let kill_users_processes ~uid =
+  let rec aux n =
+    let pp _ ppf = Fmt.pf ppf "[ PKILL ]" in
+    let delete = ["pkill"; "-9"; "-U"; string_of_int uid ] in
+    let* t = sudo_result ~pp:(pp "PKILL") delete in
     match t with
     | Ok () ->
-        exists_non_zombie_processes ~uid
-        >>= (fun b ->
-          if b then Lwt.return_unit
-          else kill_users_processes ~uid)
+      if n > 0 then aux (n - 1)
+      else Lwt.return_unit
     | Error (`Msg _) ->
       Log.info (fun f -> f "pkill all killed");
       Lwt.return_unit
+  in
+  aux 8
 
 let rec sudo_retry cmds ~uid =
   let pp f = pp_cmd f ("", cmds) in
