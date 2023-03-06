@@ -1,6 +1,5 @@
 (* Extensions to the Os module for macOS *)
 open Lwt.Syntax
-open Lwt.Infix
 open Os
 
 let ( / ) = Filename.concat
