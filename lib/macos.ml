@@ -34,6 +34,18 @@ let delete_user ~user =
       let delete = ["dscl"; "."; "-delete"; user ] in
         sudo_result ~pp:(pp "Deleting") delete
 
+let user_running_processes ~uid =
+  let pp _ ppf = Fmt.pf ppf "[ PS AX ]" in
+  let delete = ["ps"; "ax"; "-u"; string_of_int uid ] in
+  Os.with_pipe_from_child @@ fun ~r ~w ->
+  let* t = sudo_result ~stdout:(`FD_move_safely w) ~pp:(pp "PS AX") delete in
+  let data = Bytes.create 512 in
+  match t with
+  | Ok () -> Lwt_unix.read r data 0 512 >>= fun _ -> Bytes.to_string data |> Lwt.return
+  | Error (`Msg _) ->
+    Log.err (fun f -> f "ps ax failed");
+    Lwt.return "None"
+
 (** Attempt to `pkill` at most 5 times, as we can't tell whether we're successfully
     killing processes or whether a zombified process is stuck *)
 let kill_users_processes ~uid =
@@ -44,7 +56,10 @@ let kill_users_processes ~uid =
     match t with
     | Ok () ->
       if n > 0 then aux (n - 1)
-      else Lwt.return_unit
+      else (
+        user_running_processes ~uid >>= fun s ->
+        Log.err (fun f -> f "Gave up pkill after 8 tries. ps ax -u %s:\n%s" (string_of_int uid) s);
+        Lwt.return_unit)
     | Error (`Msg _) ->
       Log.info (fun f -> f "pkill all killed");
       Lwt.return_unit
