@@ -1,5 +1,6 @@
 (* Extensions to the Os module for macOS *)
 open Lwt.Syntax
+open Lwt.Infix
 open Os
 
 let ( / ) = Filename.concat
@@ -33,7 +34,7 @@ let delete_user ~user =
       let delete = ["dscl"; "."; "-delete"; user ] in
         sudo_result ~pp:(pp "Deleting") delete
 
-(** Attempt to `pkill` at most 8 times, as we can't tell whether we're successfully
+(** Attempt to `pkill` at most 5 times, as we can't tell whether we're successfully
     killing processes or whether a zombified process is stuck *)
 let kill_users_processes ~uid =
   let rec aux n =
@@ -48,7 +49,7 @@ let kill_users_processes ~uid =
       Log.info (fun f -> f "pkill all killed");
       Lwt.return_unit
   in
-  aux 8
+  aux 5
 
 let rec sudo_retry cmds ~uid =
   let pp f = pp_cmd f ("", cmds) in
